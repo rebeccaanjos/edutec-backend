@@ -1,6 +1,7 @@
 const express = require("express")
 const cors = require("cors")
 const mysql = require("mysql2")
+const bodyParser = require("body-parser");
 const jwt = require("jsonwebtoken")
 
 const app = express()
@@ -9,12 +10,14 @@ const { DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, SECRET_KEY } = process.env
 
 app.use(cors())
 app.use(express.json())
+app.use(bodyParser.json());
+
 
 app.post("/register", (request, response) => {
     const user = request.body.user
 
     const searchCommand = `
-        SELECT * FROM users
+        SELECT * FROM Users
         WHERE email = ?
     `
 
@@ -49,7 +52,7 @@ app.post("/login" , (request, response) => {
     const user = request.body.user
 
     const searchCommand = `
-        SELECT * FROM users
+        SELECT * FROM Users
         WHERE email = ?
     `
 
@@ -98,6 +101,93 @@ app.get("/getname", (request, response) => {
         
     response.json({ name: decoded.name })
 })
+
+
+
+app.post("/ranking", (request, response) => {
+    const token = request.headers.authorization;
+
+    try {
+        const decoded = jwt.verify(token, SECRET_KEY); // Decodifica o token para obter o nome do usuário
+        const { score } = request.body;
+
+        if (typeof score !== "number") {
+            response.status(400).json({ message: "Pontuação inválida!" });
+            return;
+        }
+
+        const searchCommand = `
+            SELECT * FROM ranking
+            WHERE name = ?
+        `
+
+        db.query(searchCommand, [decoded.name], (error, results) => {
+            if (error) {
+                console.error("Erro ao buscar ranking:", error);
+                response.status(500).json({ message: "Erro no servidor" });
+                return;
+            }
+
+            if (results.length > 0) {
+                // Atualizar pontuação existente se a nova for maior
+                const updateCommand = `
+                    UPDATE ranking
+                    SET score = GREATEST(score, ?)
+                    WHERE name = ?
+                `
+
+                db.query(updateCommand, [score, decoded.name], (error) => {
+                    if (error) {
+                        console.error("Erro ao atualizar pontuação:", error);
+                        response.status(500).json({ message: "Erro no servidor" });
+                        return;
+                    }
+
+                    response.json({ message: "Pontuação atualizada com sucesso!" });
+                });
+            } else {
+                // Inserir nova pontuação
+                const insertCommand = `
+                    INSERT INTO ranking (name, score)
+                    VALUES (?, ?)
+                `
+
+                db.query(insertCommand, [decoded.name, score], (error) => {
+                    if (error) {
+                        console.error("Erro ao salvar pontuação:", error);
+                        response.status(500).json({ message: "Erro no servidor" });
+                        return;
+                    }
+
+                    response.json({ message: "Pontuação registrada com sucesso!" });
+                });
+            }
+        });
+    } catch (error) {
+        console.error("Erro de autenticação:", error);
+        response.status(401).json({ message: "Token inválido ou expirado!" });
+    }
+});
+
+app.get("/ranking", (request, response) => {
+    const query = `
+        SELECT name, score
+        FROM ranking
+        ORDER BY score DESC
+        LIMIT 3
+    `
+
+    db.query(query, (error, results) => {
+        if (error) {
+            console.error("Erro ao buscar ranking:", error);
+            response.status(500).json({ message: "Erro no servidor" });
+            return;
+        }
+
+        response.json(results);
+    });
+});
+
 
 app.listen(3000, () => {
     console.log("Servidor rodando na porta 3000!")
